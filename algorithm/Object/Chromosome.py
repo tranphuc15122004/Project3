@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Tuple
 from algorithm.Object import *
 import algorithm.algorithm_config as config
 from algorithm.engine import dispatch_nodePair, total_cost
+from algorithm.engine import get_route_after
 
 class Chromosome:
     def __init__(self, vehicleid_to_plan: Dict[str, List[Node]], route_map: Dict[Tuple, Tuple], id_to_vehicle: Dict[str, Vehicle]):

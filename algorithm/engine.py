@@ -6,6 +6,7 @@ import os
 import random
 import re
 import sys
+import time
 from typing import Dict , List, Optional, Tuple
 from algorithm.Object import *
 import algorithm.algorithm_config as config
@@ -1290,3 +1291,321 @@ def get_UnongoingSuperNode (vehicleid_to_plan: Dict[str , List[Node]] , id_to_ve
                 Base_vehicleid_to_plan[vehicleID] = [node for i , node in enumerate(vehicle_plan) if i not in node_to_remove]
 
     return UnongoingSuperNodes , Base_vehicleid_to_plan
+
+
+def new_generate_random_chromosome(initial_vehicleid_to_plan : Dict[str , List[Node]],  route_map: Dict[Tuple, Tuple], id_to_vehicle: Dict[str, Vehicle], Unongoing_super_nodes : Dict[int , Dict[str, Node]]  ,Base_vehicleid_to_plan : Dict[str , List[Node]] , quantity : int):
+    ls_node_pair_num = len(Unongoing_super_nodes)
+    if ls_node_pair_num == 0:
+        return None , None
+
+    #Quan the
+    population : List[Chromosome] = []
+    number_of_node = 0
+    for plan in initial_vehicleid_to_plan.values():
+        number_of_node += len(plan)
+    
+    pdg_Map : Dict[str , List[Node]] = {}
+    
+    # tao Dict cac super node
+    for idx, pdg in Unongoing_super_nodes.items():
+        pickup_node = None
+        delivery_node = None
+        node_list: List[Node] = []
+        pos_i = 0
+        pos_j = 0
+        d_num = len(pdg) // 2
+        index = 0
+
+        if pdg:
+            vehicleID = ''
+            for v_and_pos_str, node in (pdg.items()):
+                vehicleID = v_and_pos_str.split(",")[0]
+                if index % 2 == 0:
+                    pos_i = int(v_and_pos_str.split(",")[1])
+                    pickup_node = node
+                    node_list.insert(0, pickup_node)
+                    index += 1
+                else:
+                    pos_j = int(v_and_pos_str.split(",")[1])
+                    delivery_node = node
+                    node_list.append(delivery_node)
+                    index += 1
+                    pos_j = int(pos_j - d_num + 1)
+            
+            k : str = f"{vehicleID},{int(pos_i)}+{int(pos_j)}"
+            pdg_Map[k] = node_list
+    if len(pdg_Map) < 2:
+        return None , None
+    
+    while len(population) < quantity:
+        new_individual = disturbance_opt(initial_vehicleid_to_plan , id_to_vehicle , route_map , 0.5)
+        
+        if new_individual:
+            population.append(new_individual)
+    
+    population.append(Chromosome(initial_vehicleid_to_plan , route_map , id_to_vehicle))
+    return population , pdg_Map 
+
+
+
+def disturbance_opt(vehicleid_to_plan: Dict[str , List[Node]], id_to_vehicle: Dict[str , Vehicle] , route_map: Dict[tuple , tuple] , relocate_rate = 0.3):
+    begin = time.time()
+    
+    new_vehicle_to_plan : Dict[str , List[Node]] = {}
+    for VID , plan in vehicleid_to_plan.items():
+        new_vehicle_to_plan[VID] = []
+        for node in plan:
+            new_vehicle_to_plan[VID].append(copy.deepcopy(node))
+            
+    dis_order_super_node,  _ = get_UnongoingSuperNode(vehicleid_to_plan , id_to_vehicle)
+    ls_node_pair_num = len(dis_order_super_node)
+    if ls_node_pair_num == 0:
+        return None
+    
+    pdg_Map : Dict[str , List[Node]] = {}
+    
+    for idx, pdg in dis_order_super_node.items():
+        pickup_node = None
+        delivery_node = None
+        node_list: List[Node] = []
+        pos_i = 0
+        pos_j = 0
+        d_num = len(pdg) // 2
+        index = 0
+
+        if pdg:
+            for v_and_pos_str, node in pdg.items():
+                if index % 2 == 0:
+                    vehicleID = v_and_pos_str.split(",")[0]
+                    pos_i = int(v_and_pos_str.split(",")[1])
+                    pickup_node = node
+                    node_list.insert(0, pickup_node)
+                    index += 1
+                else:
+                    pos_j = int(v_and_pos_str.split(",")[1])
+                    delivery_node = node
+                    node_list.append(delivery_node)
+                    index += 1
+                    pos_j = pos_j - d_num + 1
+
+            k : str = f"{vehicleID},{int(pos_i)}+{int(pos_j)}"
+            pdg_Map[k] = node_list
+            
+    if len(pdg_Map) < 2:
+        return None
+
+    num_pairs_to_relocate = max(1, int(len(pdg_Map) * relocate_rate))
+    pairs_to_relocate = random.sample(list(pdg_Map.keys()), num_pairs_to_relocate)
+    
+    # Lưu trữ các cặp node sẽ được gán lại
+    relocated_pairs : Dict[str, List[Node]] = {}
+    
+    # Nhóm các cặp node cần xóa theo xe
+    vehicle_removal_info : Dict[str, List[tuple]] = {}
+    
+    for key in pairs_to_relocate:
+        relocated_pairs[key] = pdg_Map[key]
+        
+        # Lấy thông tin vị trí và xe
+        vehicle_pos_info = key.split(',')
+        vehicle_id = vehicle_pos_info[0]
+        positions = vehicle_pos_info[1].split('+')
+        pos_i = int(positions[0])
+        pos_j = int(positions[1])
+        
+        node_list = pdg_Map[key]
+        d_num = len(node_list) // 2
+        
+        # Thêm thông tin xóa vào dictionary theo xe
+        if vehicle_id not in vehicle_removal_info:
+            vehicle_removal_info[vehicle_id] = []
+        vehicle_removal_info[vehicle_id].append((pos_i, pos_i + d_num, pos_j, pos_j + d_num))
+    
+    # Xây dựng lời giải sau khi bỏ những cặp sẽ được gán lại
+    for vehicle_id, removal_list in vehicle_removal_info.items():
+        route_node_list = new_vehicle_to_plan.get(vehicle_id, [])
+        
+        # Thu thập tất cả các chỉ số cần xóa
+        indices_to_remove = set()
+        for pos_i_start, pos_i_end, pos_j_start, pos_j_end in removal_list:
+            # Thêm chỉ số pickup nodes
+            for idx in range(pos_i_start, pos_i_end):
+                if idx < len(route_node_list):
+                    indices_to_remove.add(idx)
+            # Thêm chỉ số delivery nodes
+            for idx in range(pos_j_start, pos_j_end):
+                if idx < len(route_node_list):
+                    indices_to_remove.add(idx)
+        
+        # Sắp xếp chỉ số theo thứ tự giảm dần để xóa từ cuối lên đầu
+        sorted_indices = sorted(indices_to_remove, reverse=True)
+        
+        # Xóa các node theo thứ tự từ cuối lên đầu
+        for idx in sorted_indices:
+            if idx < len(route_node_list):
+                del route_node_list[idx]
+        
+        new_vehicle_to_plan[vehicle_id] = route_node_list
+    
+    # Gán lại các cặp node đã đánh dấu một cách ngẫu nhiên vào tuyến đường
+    for key, node_list in relocated_pairs.items():
+        # Sử dụng random_dispatch_nodePair để gán ngẫu nhiên cặp node
+        random_dispatch_nodePair(node_list, id_to_vehicle, new_vehicle_to_plan)
+    
+    
+    #print(time.time() - begin)
+    return Chromosome(new_vehicle_to_plan , route_map , id_to_vehicle)
+
+
+
+def random_dispatch_nodePair(node_list: list[Node], id_to_vehicle: Dict[str, Vehicle], vehicleid_to_plan: Dict[str, list[Node]]):
+    """
+    Randomly insert a pickup-delivery pair into a vehicle route without:
+    - losing nodes,
+    - duplicating nodes,
+    - or altering the destination position (index 0) for vehicles that have a current destination.
+    """
+    if not node_list or len(node_list) < 2:
+        return
+
+    is_inserted = False
+    attempts = 0
+    MAX_ATTEMPTS = 500
+    # Probability to try simple end-extension (append pickup & delivery at tail)
+    p_extend_end = 1
+    while not is_inserted:
+        selected_vehicleID = random.choice(list(id_to_vehicle.keys()))
+        selected_vehicle = id_to_vehicle[selected_vehicleID]
+
+        # Ensure the plan list exists
+        route = vehicleid_to_plan.get(selected_vehicleID)
+        if route is None:
+            route = []
+            vehicleid_to_plan[selected_vehicleID] = route
+
+        begin_pos = 1 if selected_vehicle.des else 0  # never insert before index 0 if a destination exists
+        check_end = False
+        old_len = len(route)
+
+        # If route is empty but vehicle currently has a destination, put that destination at index 0 first
+        if old_len == 0 and selected_vehicle.des is not None:
+            route.append(selected_vehicle.des)
+            old_len = 1  # destination preserved at index 0
+
+        pickup_node = None
+        delivery_node = None
+        if node_list[0].pickup_item_list and not node_list[0].delivery_item_list:
+            pickup_node , delivery_node = node_list[0] , node_list[-1]
+        else: 
+            delivery_node , pickup_node = node_list[0] , node_list[-1]
+            
+
+        # Helper: get current carrying items as Python list (bottom -> top)
+        def _get_carrying_list(v: Vehicle) -> List[OrderItem]:
+            ci = getattr(v, 'carrying_items', None)
+            # Try to deep copy stack-like object
+            try:
+                ci_copy = copy.deepcopy(ci)
+            except Exception:
+                ci_copy = ci
+            # Stack-like: has is_empty/pop
+            try:
+                items_top_first: List[OrderItem] = []
+                while ci_copy is not None and hasattr(ci_copy, 'is_empty') and not ci_copy.is_empty():
+                    items_top_first.append(ci_copy.pop())
+                # convert top->bottom to bottom->top for isFeasible
+                return list(reversed(items_top_first)) if items_top_first else (list(ci_copy) if isinstance(ci_copy, list) else [])
+            except Exception:
+                # list-like
+                try:
+                    return list(ci_copy) if ci_copy is not None else []
+                except Exception:
+                    return []
+
+        if old_len == 0:
+            # No destination and no existing route -> simply append pair (feasibility-checked)
+            route.extend([pickup_node, delivery_node])
+            carrying_items = _get_carrying_list(selected_vehicle)
+            if isFeasible(route, carrying_items, selected_vehicle.board_capacity):
+                is_inserted = True
+            else:
+                # revert and retry with another vehicle
+                route.pop(); route.pop()
+        else:
+            # Branch 1: try end-extension with probability p_extend_end
+            did_try_extend = False
+            if random.random() < p_extend_end:
+                did_try_extend = True
+                route.append(pickup_node)
+                route.append(delivery_node)
+                carrying_items = _get_carrying_list(selected_vehicle)
+                # Validate destination position & feasibility
+                if (selected_vehicle.des and route[0].id != selected_vehicle.des.id) or not isFeasible(route, carrying_items, selected_vehicle.board_capacity):
+                    # Revert
+                    route.pop(); route.pop()
+                else:
+                    is_inserted = True
+
+            # Branch 2: general random insertion search if not inserted yet
+            if not is_inserted and not did_try_extend:
+                # Try random feasible positions for pickup and delivery (delivery strictly after pickup)
+                feasible_position1 = [i for i in range(begin_pos, len(route) + 1)]
+                random.shuffle(feasible_position1)
+                for insert_posI in feasible_position1:
+                    feasible_position2 = [i for i in range(insert_posI + 1, len(route) + 2)]
+                    random.shuffle(feasible_position2)
+                    for insert_posJ in feasible_position2:
+                        route.insert(insert_posI, pickup_node)
+                        route.insert(insert_posJ, delivery_node)
+
+                        # Do not allow changing destination position at index 0
+                        if selected_vehicle.des and route and route[0].id != selected_vehicle.des.id:
+                            # revert immediately if destination got shifted
+                            route.pop(insert_posJ)
+                            route.pop(insert_posI)
+                            continue
+
+                        carrying_items = _get_carrying_list(selected_vehicle)
+                        if isFeasible(route, carrying_items, selected_vehicle.board_capacity):
+                            check_end = True
+                            break
+
+                        # Revert failed attempt
+                        route.pop(insert_posJ)
+                        route.pop(insert_posI)
+                    if check_end:
+                        break
+
+        # Confirm exactly two nodes were added and, if applicable, destination preserved
+        if len(route) == old_len + 2:
+            if not selected_vehicle.des or (route and route[0].id == selected_vehicle.des.id):
+                is_inserted = True
+
+        attempts += 1
+        if not is_inserted and attempts >= MAX_ATTEMPTS:
+            # Fallback: try exhaustive feasible insertion over all vehicles/positions deterministically
+            for vID, v in id_to_vehicle.items():
+                r = vehicleid_to_plan.get(vID)
+                if r is None:
+                    r = []
+                    vehicleid_to_plan[vID] = r
+                begin_pos2 = 1 if v.des else 0
+                base_len = len(r)
+                if base_len == 0 and v.des is not None:
+                    r.append(v.des); base_len = 1
+                for i in range(begin_pos2, len(r) + 1):
+                    for j in range(i + 1, len(r) + 2):
+                        r.insert(i, pickup_node)
+                        r.insert(j, delivery_node)
+                        # keep destination header
+                        if v.des and r and r[0].id != v.des.id:
+                            r.pop(j); r.pop(i)
+                            continue
+                        if isFeasible(r, _get_carrying_list(v), v.board_capacity):
+                            return
+                        r.pop(j); r.pop(i)
+            # If still not inserted, log and return without modification (caller may handle)
+            print("[random_dispatch_nodePair] Failed to insert PD pair after exhaustive search", file=sys.stderr)
+            return
+        
+        

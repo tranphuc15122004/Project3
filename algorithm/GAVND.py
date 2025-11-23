@@ -8,6 +8,8 @@ import copy
 from engine import *
 import contextlib
 import math
+from algorithm.local_search import *
+from algorithm.crossover import new_crossver2
 
 
 def _copy_solution(sol: Dict[str, List[Node]]) -> Dict[str, List[Node]]:
@@ -120,12 +122,36 @@ def GAVND_7(initial_vehicleid_to_plan: Dict[str, List[Node]], route_map: Dict[Tu
         if elapsed_time  > config.ALGO_TIME_LIMIT:
             print(f"TimeOut!! Elapsed: {elapsed_time:.1f}s")
             break
-        
-        
     final_time = time.time()
     total_runtime = final_time - config.BEGIN_TIME
     print(f"Total runtime: {total_runtime:.2f}s ({total_runtime/60:.1f} minutes)" )
     print(f"Total GA runtime: {final_time - begin_GA_time:.2f}s ({(final_time - begin_GA_time)/60:.1f} minutes)" )
+    
+    
+    # Giai doan 2
+    unique_population = remove_similar_individuals(population, threshold=0.0)
+    unique_population.sort(key=lambda x: x.fitness)
+    print(len(unique_population))
+    
+    unique_population = [ini for ini in unique_population if ini.fitness < best_solution.fitness  + config.addDelta]
+    print(len(unique_population))
+    
+    mutate_count = 0
+    while not config.is_timeout():
+        
+        if mutate_count > int(len(population) * config.MUTATION_RATE) or mutate_count >= len(unique_population):
+            break
+        
+        if unique_population[mutate_count % len(unique_population)].fitness > unique_population[0].fitness + config.addDelta: break
+        
+        adaptive_LS_stategy(unique_population[mutate_count] , PDG_map , False )
+        
+        mutate_count += 1
+    
+    unique_population.sort(key=lambda x: x.fitness)
+    if unique_population[0].fitness < best_solution.fitness: config.IMPROVED_IN_DIVER += 1
+    best_solution = unique_population[0]
+    
     return best_solution
 
 def select_parents(population: List[Chromosome]) -> Tuple[Chromosome, Chromosome]:
